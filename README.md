@@ -109,12 +109,19 @@ npm start
    basin.
 4. Turn on the finished-map elements you want: **frame**, **scale bar**,
    **compass rose**, **depth numbers**, **auto stats** (surface area + max depth,
-   computed from the real data), and the OpenStreetMap **overlays** (roads,
-   dotted state/province boundaries, city & state labels).
-5. Use the **despeckle** slider to drop tiny stray islands so each cut layer is
+   computed from the real data), and the OpenStreetMap **overlays**:
+   - **State / province names** are placed inside each state's *visible* area.
+   - **Boundaries** draw as clean dotted lines (shared borders de-duplicated).
+   - **Roads** default to major highways only; a **Road detail** menu adds
+     secondary/tertiary or all streets when you want more.
+   - **Major cities** is an optional extra (off by default) limited to the few
+     largest — so labels never turn into a jumble.
+5. Under **Layout & placement**, move the **compass, title, and scale bar** to
+   any corner and resize them, and scale the **depth numbers** and **labels**.
+6. Use the **despeckle** slider to drop tiny stray islands so each cut layer is
    clean.
-6. Switch **Shaded art** ↔ **Cut lines** in the preview.
-7. **Download SVG** — it contains everything, ready to import into xTool Studio.
+7. Switch **Shaded art** ↔ **Cut lines** in the preview.
+8. **Download SVG** — it contains everything, ready to import into xTool Studio.
 
 ## Preparing the SVG for laser cutting
 

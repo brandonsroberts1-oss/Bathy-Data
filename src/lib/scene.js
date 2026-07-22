@@ -138,19 +138,21 @@ export function buildScene(grid, settings, overlays = null) {
   // exported paths laser-safe without relying on SVG clip-paths (which some
   // laser tools ignore).
   const rect = { x0: bx0, y0: by0, x1: bx1, y1: by1 };
-  const projLine = (coords) => {
+  // Project a lon/lat polyline and clip it to the map rect as CONTINUOUS runs
+  // (so lines aren't chopped into disjoint fragments and dashes stay even).
+  // `minLen` drops tiny clipped specks that otherwise look like noise.
+  const projLine = (coords, minLen = 0) => {
     const proj = [];
     for (const [lon, lat] of coords) {
       const p = projection([lon, lat]);
       proj.push(p && isFinite(p[0]) && isFinite(p[1]) ? p : null);
     }
+    const runs = clipPolyline(proj, rect);
     let d = '';
-    for (let i = 1; i < proj.length; i++) {
-      const a = proj[i - 1];
-      const b = proj[i];
-      if (!a || !b) continue;
-      const seg = clipSegment(a, b, rect);
-      if (seg) d += 'M' + fmt(seg[0][0]) + ',' + fmt(seg[0][1]) + 'L' + fmt(seg[1][0]) + ',' + fmt(seg[1][1]);
+    for (const run of runs) {
+      if (minLen > 0 && runLength(run) < minLen) continue;
+      d += 'M' + fmt(run[0][0]) + ',' + fmt(run[0][1]);
+      for (let i = 1; i < run.length; i++) d += 'L' + fmt(run[i][0]) + ',' + fmt(run[i][1]);
     }
     return d || null;
   };
@@ -159,10 +161,10 @@ export function buildScene(grid, settings, overlays = null) {
   let projectedOverlays = null;
   if (overlays) {
     const roads = (overlays.roads || [])
-      .map((r) => ({ kind: r.kind, d: projLine(r.coords) }))
+      .map((r) => ({ kind: r.kind, d: projLine(r.coords, viewW * 0.004) }))
       .filter((r) => r.d);
     const boundaries = (overlays.boundaries || [])
-      .map((b) => ({ d: projLine(b.coords) }))
+      .map((b) => ({ d: projLine(b.coords, viewW * 0.01) }))
       .filter((b) => b.d);
     const places = (overlays.places || [])
       .map((pl) => {
@@ -258,6 +260,40 @@ function polygonCentroid(pts, area) {
   }
   const f = 1 / (6 * area);
   return [fmt(cx * f), fmt(cy * f)];
+}
+
+// Clip a projected polyline (with possible null gaps) to a rect, returning an
+// array of continuous runs (each a list of points).
+function clipPolyline(proj, rect) {
+  const runs = [];
+  let run = null;
+  const inside = (p) => p[0] >= rect.x0 && p[0] <= rect.x1 && p[1] >= rect.y0 && p[1] <= rect.y1;
+  for (let i = 1; i < proj.length; i++) {
+    const a = proj[i - 1];
+    const b = proj[i];
+    if (!a || !b) { run = null; continue; }
+    const seg = clipSegment(a, b, rect);
+    if (!seg) { run = null; continue; }
+    const [p, q] = seg;
+    const aIn = inside(a);
+    if (run && aIn && Math.abs(run[run.length - 1][0] - p[0]) < 0.01 && Math.abs(run[run.length - 1][1] - p[1]) < 0.01) {
+      run.push(q);
+    } else {
+      if (run && run.length > 1) runs.push(run);
+      run = [p, q];
+    }
+    if (!inside(b)) { runs.push(run); run = null; } // exited the rect -> break run
+  }
+  if (run && run.length > 1) runs.push(run);
+  return runs;
+}
+
+function runLength(run) {
+  let len = 0;
+  for (let i = 1; i < run.length; i++) {
+    len += Math.hypot(run[i][0] - run[i - 1][0], run[i][1] - run[i - 1][1]);
+  }
+  return len;
 }
 
 // Liang–Barsky clip of segment a->b to an axis-aligned rect. Returns the

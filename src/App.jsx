@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import MapPicker from './components/MapPicker.jsx';
 import { buildScene } from './lib/scene.js';
 import { buildSvg } from './lib/exportSvg.js';
@@ -49,8 +49,20 @@ export default function App() {
   const [loadingOverlays, setLoadingOverlays] = useState(false);
   const [overlayNote, setOverlayNote] = useState(null);
   const [showRoads, setShowRoads] = useState(true);
-  const [showPlaces, setShowPlaces] = useState(true);
+  const [showPlaces, setShowPlaces] = useState(true); // state/province names
   const [showBoundaries, setShowBoundaries] = useState(true);
+  const [roadDetail, setRoadDetail] = useState('major'); // major | more | all
+  const [showCities, setShowCities] = useState(false); // major cities (off = states only)
+
+  // Layout: placement (corner) + size of movable elements
+  const [compassCorner, setCompassCorner] = useState('tl');
+  const [compassScale, setCompassScale] = useState(1);
+  const [titleCorner, setTitleCorner] = useState('br');
+  const [titleScale, setTitleScale] = useState(1);
+  const [scaleCorner, setScaleCorner] = useState('bl');
+  const [scaleScale, setScaleScale] = useState(1);
+  const [depthLabelScale, setDepthLabelScale] = useState(1);
+  const [placeLabelScale, setPlaceLabelScale] = useState(1);
 
   const isSample = grid?.isSample;
 
@@ -93,7 +105,6 @@ export default function App() {
       }
       setGrid(json);
       applyAutoDefaults(json);
-      loadOverlays(json.bbox || bb);
     } catch (e) {
       setError(String(e.message || e));
     } finally {
@@ -102,14 +113,14 @@ export default function App() {
   }, []);
 
   // Fetch real map overlays (roads / boundaries / labels). Non-blocking: the
-  // depth map renders without them; they pop in when ready. The synthetic
-  // sample has no real place — skip overlays for it.
-  const loadOverlays = useCallback(async (bb) => {
+  // depth map renders without them; they pop in when ready.
+  const loadOverlays = useCallback(async (bb, roads, cities) => {
     setOverlays(null);
     setOverlayNote(null);
     setLoadingOverlays(true);
     try {
-      const res = await fetch(`/api/overlays?bbox=${bb.map((x) => x.toFixed(6)).join(',')}`);
+      const qs = `bbox=${bb.map((x) => x.toFixed(6)).join(',')}&roads=${roads}&cities=${cities ? 1 : 0}`;
+      const res = await fetch(`/api/overlays?${qs}`);
       const json = await res.json();
       if (json.error) setOverlayNote(json.error);
       setOverlays(json);
@@ -119,6 +130,14 @@ export default function App() {
       setLoadingOverlays(false);
     }
   }, []);
+
+  // (Re)fetch overlays whenever the loaded area or the road/city options change.
+  // The synthetic sample has no real place, so it never fetches overlays.
+  useEffect(() => {
+    if (grid?.hasData && !grid.isSample && grid.bbox) {
+      loadOverlays(grid.bbox, roadDetail, showCities);
+    }
+  }, [grid, roadDetail, showCities, loadOverlays]);
 
   // Auto-detect a sensible surface elevation and a depth interval that spans
   // the basin, so the first render looks reasonable.
@@ -206,9 +225,19 @@ export default function App() {
       unit,
       background: background === 'transparent' ? null : background,
       isSample,
+      compassCorner,
+      compassScale,
+      titleCorner,
+      titleScale,
+      scaleCorner,
+      scaleScale,
+      depthLabelScale,
+      placeLabelScale,
     });
   }, [scene, renderMode, showScale, showCompass, showFrame, showDepthLabels, showStats,
-      showRoads, showPlaces, showBoundaries, name, info, unit, background, isSample]);
+      showRoads, showPlaces, showBoundaries, name, info, unit, background, isSample,
+      compassCorner, compassScale, titleCorner, titleScale, scaleCorner, scaleScale,
+      depthLabelScale, placeLabelScale]);
 
   const download = () => {
     if (!svg) return;
@@ -378,22 +407,36 @@ export default function App() {
 
           <label style={{ marginTop: 12 }}>Map overlays (real, from OpenStreetMap)</label>
           <label className="toggle">
-            <input type="checkbox" checked={showRoads} onChange={(e) => setShowRoads(e.target.checked)} />
-            Roads / streets (engraved)
+            <input type="checkbox" checked={showPlaces} onChange={(e) => setShowPlaces(e.target.checked)} />
+            State / province names
           </label>
           <label className="toggle">
             <input type="checkbox" checked={showBoundaries} onChange={(e) => setShowBoundaries(e.target.checked)} />
             State / province boundaries (dotted)
           </label>
           <label className="toggle">
-            <input type="checkbox" checked={showPlaces} onChange={(e) => setShowPlaces(e.target.checked)} />
-            City &amp; state labels
+            <input type="checkbox" checked={showRoads} onChange={(e) => setShowRoads(e.target.checked)} />
+            Roads / streets (engraved)
+          </label>
+          {showRoads && (
+            <>
+              <label>Road detail</label>
+              <select value={roadDetail} onChange={(e) => setRoadDetail(e.target.value)}>
+                <option value="major">Major highways only (cleanest)</option>
+                <option value="more">+ Secondary &amp; tertiary</option>
+                <option value="all">All streets (dense)</option>
+              </select>
+            </>
+          )}
+          <label className="toggle">
+            <input type="checkbox" checked={showCities} onChange={(e) => setShowCities(e.target.checked)} />
+            Also label major cities (top few only)
           </label>
           {loadingOverlays && <div className="hint"><span className="spinner" /> Fetching roads &amp; labels from OpenStreetMap…</div>}
           {overlays?.counts && !loadingOverlays && (
             <div className="hint">
               Loaded <b>{overlays.counts.roads}</b> roads, <b>{overlays.counts.boundaries}</b> boundary lines,{' '}
-              <b>{overlays.counts.places}</b> labels.
+              <b>{overlays.counts.states}</b> states, <b>{overlays.counts.cities}</b> cities.
             </div>
           )}
           {overlayNote && <div className="hint warn">{overlayNote}</div>}
@@ -418,9 +461,42 @@ export default function App() {
           </select>
         </div>
 
+        {/* LAYOUT */}
+        <div className="card">
+          <h2>5 · Layout &amp; placement</h2>
+
+          <PlacementRow
+            label="Compass"
+            corner={compassCorner}
+            setCorner={setCompassCorner}
+            size={compassScale}
+            setSize={setCompassScale}
+          />
+          <PlacementRow
+            label="Title &amp; stats"
+            corner={titleCorner}
+            setCorner={setTitleCorner}
+            size={titleScale}
+            setSize={setTitleScale}
+          />
+          <PlacementRow
+            label="Scale bar"
+            corner={scaleCorner}
+            setCorner={setScaleCorner}
+            size={scaleScale}
+            setSize={setScaleScale}
+          />
+
+          <label style={{ marginTop: 12 }}>Depth-number size: {depthLabelScale.toFixed(1)}×</label>
+          <input type="range" min="0.5" max="2.5" step="0.1" value={depthLabelScale} onChange={(e) => setDepthLabelScale(Number(e.target.value))} style={{ width: '100%' }} />
+
+          <label>State / city label size: {placeLabelScale.toFixed(1)}×</label>
+          <input type="range" min="0.5" max="2.5" step="0.1" value={placeLabelScale} onChange={(e) => setPlaceLabelScale(Number(e.target.value))} style={{ width: '100%' }} />
+        </div>
+
         {/* EXPORT */}
         <div className="card">
-          <h2>5 · Export</h2>
+          <h2>6 · Export</h2>
           <button style={{ width: '100%' }} onClick={download} disabled={!svg}>⬇ Download SVG</button>
           {grid?.source && (
             <div className="statline" style={{ marginTop: 10 }}>
@@ -481,6 +557,24 @@ export default function App() {
           sanity-check against a nautical chart before cutting a piece you intend to sell.
         </div>
       </main>
+    </div>
+  );
+}
+
+// --- small UI helper: corner picker + size slider for a movable element ----
+function PlacementRow({ label, corner, setCorner, size, setSize }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <label dangerouslySetInnerHTML={{ __html: `${label} — position &amp; size: ${size.toFixed(1)}×` }} />
+      <div className="row">
+        <select value={corner} onChange={(e) => setCorner(e.target.value)} style={{ flex: 2 }}>
+          <option value="tl">Top-left</option>
+          <option value="tr">Top-right</option>
+          <option value="bl">Bottom-left</option>
+          <option value="br">Bottom-right</option>
+        </select>
+        <input type="range" min="0.5" max="2.5" step="0.1" value={size} onChange={(e) => setSize(Number(e.target.value))} style={{ flex: 3 }} />
+      </div>
     </div>
   );
 }

@@ -74,12 +74,14 @@ app.get('/api/overlays', async (req, res) => {
   const [w, s, e, n] = bbox;
   if (w >= e || s >= n) return res.status(400).json({ error: 'bbox must have west<east and south<north' });
   if (e - w > 12 || n - s > 12) return res.status(400).json({ error: 'bbox too large for overlays.' });
+  const roadDetail = (req.query.roads || 'major').toString();
+  const cities = req.query.cities === '1' || req.query.cities === 'true';
   try {
-    const overlays = await fetchOverlays(bbox);
+    const overlays = await fetchOverlays(bbox, { roadDetail, cities });
     res.json(overlays);
   } catch (err) {
     // Overlays are optional decoration — never block the map on them.
-    res.json({ bbox, error: `Overlays unavailable: ${err.message}`, roads: [], boundaries: [], places: [], counts: { roads: 0, boundaries: 0, places: 0 } });
+    res.json({ bbox, error: `Overlays unavailable: ${err.message}`, roads: [], boundaries: [], places: [], counts: { roads: 0, boundaries: 0, states: 0, cities: 0 } });
   }
 });
 
