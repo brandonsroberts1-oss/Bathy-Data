@@ -7,6 +7,7 @@ import fs from 'node:fs';
 
 import { searchWaterBody } from './geocode.js';
 import { fetchBathymetryGrid } from './bathymetry.js';
+import { fetchOverlays } from './overlays.js';
 import { SOURCES } from './datasources.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -61,6 +62,24 @@ app.get('/api/bathymetry', async (req, res) => {
     res.json(grid);
   } catch (err) {
     res.status(502).json({ error: `Bathymetry fetch failed: ${err.message}` });
+  }
+});
+
+// Fetch real map overlays (roads, boundaries, place labels) for a bbox.
+app.get('/api/overlays', async (req, res) => {
+  const bbox = (req.query.bbox || '').toString().split(',').map(Number);
+  if (bbox.length !== 4 || bbox.some((n) => Number.isNaN(n))) {
+    return res.status(400).json({ error: 'bbox must be "west,south,east,north"' });
+  }
+  const [w, s, e, n] = bbox;
+  if (w >= e || s >= n) return res.status(400).json({ error: 'bbox must have west<east and south<north' });
+  if (e - w > 12 || n - s > 12) return res.status(400).json({ error: 'bbox too large for overlays.' });
+  try {
+    const overlays = await fetchOverlays(bbox);
+    res.json(overlays);
+  } catch (err) {
+    // Overlays are optional decoration — never block the map on them.
+    res.json({ bbox, error: `Overlays unavailable: ${err.message}`, roads: [], boundaries: [], places: [], counts: { roads: 0, boundaries: 0, places: 0 } });
   }
 });
 

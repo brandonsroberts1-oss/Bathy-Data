@@ -38,9 +38,25 @@ export default function App() {
   const [renderMode, setRenderMode] = useState('filled'); // 'filled' | 'cut'
   const [showScale, setShowScale] = useState(true);
   const [showCompass, setShowCompass] = useState(true);
+  const [showFrame, setShowFrame] = useState(true);
+  const [showDepthLabels, setShowDepthLabels] = useState(true);
+  const [showStats, setShowStats] = useState(true);
   const [background, setBackground] = useState('transparent');
+  const [despeckle, setDespeckle] = useState(20); // 0..100 despeckle strength
+
+  // Map overlays (roads / boundaries / place labels), from OpenStreetMap
+  const [overlays, setOverlays] = useState(null);
+  const [loadingOverlays, setLoadingOverlays] = useState(false);
+  const [overlayNote, setOverlayNote] = useState(null);
+  const [showRoads, setShowRoads] = useState(true);
+  const [showPlaces, setShowPlaces] = useState(true);
+  const [showBoundaries, setShowBoundaries] = useState(true);
 
   const isSample = grid?.isSample;
+
+  // Despeckle slider (0..100) -> min feature area as a fraction of the drawing.
+  // 0 keeps everything; higher removes larger specks. Caps well below 1%.
+  const minFeatureAreaFrac = (despeckle / 100) * 0.006;
 
   // --- Search -------------------------------------------------------------
   const runSearch = useCallback(async () => {
@@ -77,10 +93,30 @@ export default function App() {
       }
       setGrid(json);
       applyAutoDefaults(json);
+      loadOverlays(json.bbox || bb);
     } catch (e) {
       setError(String(e.message || e));
     } finally {
       setLoadingGrid(false);
+    }
+  }, []);
+
+  // Fetch real map overlays (roads / boundaries / labels). Non-blocking: the
+  // depth map renders without them; they pop in when ready. The synthetic
+  // sample has no real place — skip overlays for it.
+  const loadOverlays = useCallback(async (bb) => {
+    setOverlays(null);
+    setOverlayNote(null);
+    setLoadingOverlays(true);
+    try {
+      const res = await fetch(`/api/overlays?bbox=${bb.map((x) => x.toFixed(6)).join(',')}`);
+      const json = await res.json();
+      if (json.error) setOverlayNote(json.error);
+      setOverlays(json);
+    } catch (e) {
+      setOverlayNote(`Overlays unavailable: ${String(e.message || e)}`);
+    } finally {
+      setLoadingOverlays(false);
     }
   }, []);
 
@@ -125,6 +161,8 @@ export default function App() {
     setGrid(g);
     setNoData(null);
     setError(null);
+    setOverlays(null); // synthetic place -> no real roads/labels
+    setOverlayNote('Sample has no real location, so map overlays are off.');
     setName(name || 'Sample Basin (SYNTHETIC)');
     applyAutoDefaults(g);
   };
@@ -133,18 +171,23 @@ export default function App() {
   const scene = useMemo(() => {
     if (!grid?.hasData) return null;
     try {
-      return buildScene(grid, {
-        surfaceElevation: surface,
-        layers,
-        intervalMeters: unitToMeters(interval, unit),
-        drawWidth: DRAW_WIDTH,
-        unit,
-      });
+      return buildScene(
+        grid,
+        {
+          surfaceElevation: surface,
+          layers,
+          intervalMeters: unitToMeters(interval, unit),
+          drawWidth: DRAW_WIDTH,
+          unit,
+          minFeatureAreaFrac,
+        },
+        overlays,
+      );
     } catch (e) {
       console.error('scene build failed', e);
       return null;
     }
-  }, [grid, surface, layers, interval, unit]);
+  }, [grid, surface, layers, interval, unit, minFeatureAreaFrac, overlays]);
 
   const svg = useMemo(() => {
     if (!scene) return '';
@@ -152,13 +195,20 @@ export default function App() {
       mode: renderMode,
       showScale,
       showCompass,
+      showFrame,
+      showDepthLabels,
+      showStats,
+      showRoads,
+      showPlaces,
+      showBoundaries,
       name,
       info,
       unit,
       background: background === 'transparent' ? null : background,
       isSample,
     });
-  }, [scene, renderMode, showScale, showCompass, name, info, unit, background, isSample]);
+  }, [scene, renderMode, showScale, showCompass, showFrame, showDepthLabels, showStats,
+      showRoads, showPlaces, showBoundaries, name, info, unit, background, isSample]);
 
   const download = () => {
     if (!svg) return;
@@ -304,16 +354,55 @@ export default function App() {
 
         {/* EXTRAS */}
         <div className="card">
-          <h2>4 · Overlays & style</h2>
+          <h2>4 · Finished-map elements</h2>
+          <label className="toggle">
+            <input type="checkbox" checked={showFrame} onChange={(e) => setShowFrame(e.target.checked)} />
+            Frame border
+          </label>
           <label className="toggle">
             <input type="checkbox" checked={showScale} onChange={(e) => setShowScale(e.target.checked)} />
             True-scale bar (accurate for this area)
           </label>
           <label className="toggle">
             <input type="checkbox" checked={showCompass} onChange={(e) => setShowCompass(e.target.checked)} />
-            Compass (north-up)
+            Compass rose
           </label>
-          <label>Render mode</label>
+          <label className="toggle">
+            <input type="checkbox" checked={showDepthLabels} onChange={(e) => setShowDepthLabels(e.target.checked)} />
+            Depth numbers on each layer
+          </label>
+          <label className="toggle">
+            <input type="checkbox" checked={showStats} onChange={(e) => setShowStats(e.target.checked)} />
+            Auto stats (surface area · max depth)
+          </label>
+
+          <label style={{ marginTop: 12 }}>Map overlays (real, from OpenStreetMap)</label>
+          <label className="toggle">
+            <input type="checkbox" checked={showRoads} onChange={(e) => setShowRoads(e.target.checked)} />
+            Roads / streets (engraved)
+          </label>
+          <label className="toggle">
+            <input type="checkbox" checked={showBoundaries} onChange={(e) => setShowBoundaries(e.target.checked)} />
+            State / province boundaries (dotted)
+          </label>
+          <label className="toggle">
+            <input type="checkbox" checked={showPlaces} onChange={(e) => setShowPlaces(e.target.checked)} />
+            City &amp; state labels
+          </label>
+          {loadingOverlays && <div className="hint"><span className="spinner" /> Fetching roads &amp; labels from OpenStreetMap…</div>}
+          {overlays?.counts && !loadingOverlays && (
+            <div className="hint">
+              Loaded <b>{overlays.counts.roads}</b> roads, <b>{overlays.counts.boundaries}</b> boundary lines,{' '}
+              <b>{overlays.counts.places}</b> labels.
+            </div>
+          )}
+          {overlayNote && <div className="hint warn">{overlayNote}</div>}
+
+          <label style={{ marginTop: 12 }}>Remove small artifacts (despeckle): {despeckle}</label>
+          <input type="range" min="0" max="100" value={despeckle} onChange={(e) => setDespeckle(Number(e.target.value))} style={{ width: '100%' }} />
+          <div className="hint">Drops tiny stray islands/specks so each cut layer stays clean.</div>
+
+          <label style={{ marginTop: 12 }}>Render mode</label>
           <div className="row">
             <button className={renderMode === 'filled' ? '' : 'secondary'} onClick={() => setRenderMode('filled')}>Shaded art</button>
             <button className={renderMode === 'cut' ? '' : 'secondary'} onClick={() => setRenderMode('cut')}>Cut lines</button>

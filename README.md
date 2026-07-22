@@ -38,6 +38,13 @@ Place names / bounding boxes come from the free
 [OpenStreetMap Nominatim](https://nominatim.org/) geocoder (name + extent only —
 no depth data).
 
+**Map overlays** — roads/streets, state & province boundaries, and city/state
+labels — are real data from [OpenStreetMap](https://www.openstreetmap.org/) via
+the [Overpass API](https://overpass-api.de/). They're fetched only when you have
+those toggles on, and they degrade gracefully: if Overpass is busy or rate-limited
+the depth map still renders, just without decorations. Big areas pull only major
+highways (like retail lake art); smaller areas pull more local streets.
+
 ### A note on coverage (please read before selling anything)
 
 - **Oceans, bays, and coasts:** excellent. The CRM is genuinely detailed.
@@ -53,7 +60,21 @@ nautical chart before cutting a piece you intend to sell.**
 
 ---
 
-## Run it
+## Run it — the easy way (one click)
+
+You still need **Node.js** installed once (get the LTS from https://nodejs.org).
+After that:
+
+- **macOS:** double-click **`start.command`** (first time: right-click → Open to approve it).
+- **Windows:** double-click **`start.bat`**.
+- **Linux:** run **`./start.sh`**.
+
+The launcher installs everything on first run, builds the app, starts it, and
+opens **http://localhost:8787** in your browser. Leave the little terminal
+window open while you work; close it to stop. That's it — no commands to
+remember.
+
+## Run it — the manual way
 
 Requires Node 18+ (developed on Node 22).
 
@@ -70,10 +91,11 @@ npm start
 # open http://localhost:8787
 ```
 
-> **Network:** the server needs outbound HTTPS to `gis.ngdc.noaa.gov` and
-> `nominatim.openstreetmap.org`. If you run it behind a restrictive proxy those
-> hosts must be allowlisted. Use **Load sample (synthetic)** to try the UI
-> offline — that data is clearly watermarked and is **not** real.
+> **Network:** the server needs outbound HTTPS to `gis.ngdc.noaa.gov`,
+> `nominatim.openstreetmap.org`, and `overpass-api.de`. If you run it behind a
+> restrictive proxy those hosts must be allowlisted. Use **Load sample
+> (synthetic)** to try the UI offline — that data is clearly watermarked and is
+> **not** real.
 
 ---
 
@@ -85,40 +107,58 @@ npm start
 3. Set the **units**, **number of layers**, and **depth per layer**. Use
    **Auto-fit interval to full depth** to spread your layers across the whole
    basin.
-4. Toggle the **scale bar** and **compass**.
-5. Switch **Shaded art** ↔ **Cut lines** in the preview.
-6. **Download SVG.**
+4. Turn on the finished-map elements you want: **frame**, **scale bar**,
+   **compass rose**, **depth numbers**, **auto stats** (surface area + max depth,
+   computed from the real data), and the OpenStreetMap **overlays** (roads,
+   dotted state/province boundaries, city & state labels).
+5. Use the **despeckle** slider to drop tiny stray islands so each cut layer is
+   clean.
+6. Switch **Shaded art** ↔ **Cut lines** in the preview.
+7. **Download SVG** — it contains everything, ready to import into xTool Studio.
 
 ## Preparing the SVG for laser cutting
 
-- The export contains one `<g inkscape:groupmode="layer">` per depth, labelled
-  `Depth 10 ft`, `Depth 20 ft`, … plus `Shoreline`, `Scale bar`, `Compass`, and
-  `Title`. Every layer opens as a separate object/layer in xTool Studio and
-  Inkscape so you can assign material, order, and process (cut vs. score vs.
-  engrave) per depth.
-- **Cut lines** mode outputs hairline outlines (no fill) — the usual starting
-  point for vector cutting. **Shaded art** mode fills each band with a blue
-  depth ramp — handy for previews or grayscale/photo engraving.
-- Each layer's outline is a closed contour, so in a stacked build each layer is
-  the piece you cut for that depth and glue on top of the one below it.
+The download is a single, fully-composed framed piece. It's organized into
+`<g inkscape:groupmode="layer">` layers grouped by laser **process**, so xTool
+Studio and Inkscape open each one separately:
+
+| Layer | Suggested process |
+|---|---|
+| `Cut · Depth 10 ft`, `Cut · Depth 20 ft`, … (one per depth) | **Cut** — the stacked wood pieces |
+| `Shoreline (waterline)` | **Cut** — the top/water outline |
+| `Cut · Frame` | **Cut** or score — the border |
+| `Engrave · Roads` | **Engrave**/score — streets |
+| `Score · State boundaries` | **Score** — dotted borders |
+| `Engrave · Depth labels`, `Engrave · Place labels`, `Engrave · Title`, `Engrave · Scale bar`, `Engrave · Compass` | **Engrave** — the lettering & decoration |
+
+The layers are also colour-coded (cut = black, engrave = brown, score = grey,
+lettering = gold) so xTool's "process by colour" picks them up automatically.
+
+- **Cut lines** mode outputs hairline contour outlines (no fill) — the usual
+  starting point for vector cutting/stacking. **Shaded art** mode fills each band
+  with a blue depth ramp — handy for previews or grayscale/photo engraving.
+- Each depth layer's outline is a closed contour, so in a stacked build each
+  layer is the piece you cut for that depth and glue on top of the one below it.
 
 ---
 
 ## Project layout
 
 ```
+start.command / start.bat / start.sh   One-click launchers (Mac / Win / Linux)
 server/
   index.js         Express API + serves the built frontend in production
   datasources.js   Registry of the real NOAA sources + which to try per area
   geocode.js       Nominatim water-body search
   bathymetry.js    exportImage fetch + GeoTIFF decode → elevation grid
+  overlays.js      Overpass fetch → roads / boundaries / place labels (real OSM)
 src/
   App.jsx          UI, state, live preview + export wiring
   components/
     MapPicker.jsx  Leaflet map area picker
   lib/
-    scene.js       Grid + settings → projected contour layers (d3-contour/d3-geo)
-    exportSvg.js    Scene → layered SVG string (used by preview AND export)
+    scene.js       Grid + overlays + settings → projected layers (d3-contour/d3-geo)
+    exportSvg.js    Scene → framed, layered SVG (used by preview AND export)
     units.js        Unit conversions, haversine, nice scale lengths
     sampleGrid.js   Synthetic offline test data (watermarked; NOT real)
 ```
