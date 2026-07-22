@@ -365,7 +365,7 @@ export default function App() {
           </div>
         )}
 
-        <div className={`previewWrap ${renderMode === 'cut' || background !== 'transparent' ? 'light' : ''}`}>
+        <div className="previewWrap light">
           {svg ? (
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }} dangerouslySetInnerHTML={{ __html: svg }} />
           ) : (

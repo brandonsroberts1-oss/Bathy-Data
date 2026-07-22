@@ -71,6 +71,18 @@ async function exportFromSource(source, bbox, size) {
   const height = image.getHeight();
   const gdalNoData = image.getGDALNoData();
 
+  // Read the actual extent back from the GeoTIFF (imageSR=4326), so the grid
+  // and its bbox always agree even if ArcGIS nudged the requested extent.
+  let actualBbox = bbox;
+  try {
+    const bb = image.getBoundingBox(); // [minX, minY, maxX, maxY] in lon/lat
+    if (bb && bb.length === 4 && bb.every((n) => Number.isFinite(n))) {
+      actualBbox = [bb[0], bb[1], bb[2], bb[3]];
+    }
+  } catch {
+    /* keep requested bbox */
+  }
+
   // Copy into a clean Float32Array, converting nodata -> NaN and counting
   // genuinely-valid samples so we can decide whether this source has coverage.
   const values = new Float32Array(width * height);
@@ -98,6 +110,7 @@ async function exportFromSource(source, bbox, size) {
   return {
     width,
     height,
+    bbox: actualBbox,
     values,
     valid,
     coverage: valid / values.length,
@@ -129,7 +142,7 @@ export async function fetchBathymetryGrid(bbox, { maxDim = 480, sourceId } = {})
       if (grid.coverage > 0.02) {
         return {
           hasData: true,
-          bbox,
+          bbox: grid.bbox || bbox,
           width: grid.width,
           height: grid.height,
           // NaN -> null for JSON transport.
